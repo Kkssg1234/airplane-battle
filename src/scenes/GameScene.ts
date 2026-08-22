@@ -53,6 +53,9 @@ export class GameScene extends Scene {
   private _vignette = 0; // 受击红屏
   private _bossSummonListener: () => void;
   private _shootListener: () => void;
+  // 移动端功能按钮（炸弹 / 暂停）
+  private _bombBtn = { x: 0, y: 0, w: 84, h: 84, press: 0 };
+  private _pauseBtn = { x: 0, y: 0, w: 84, h: 84, press: 0 };
 
   constructor(game: Game, levelId: number, endless: boolean) {
     super(game);
@@ -60,6 +63,12 @@ export class GameScene extends Scene {
     this._endless = endless;
     const w = game.width;
     const h = game.height;
+
+    // 移动端按钮：左下炸弹 / 右下暂停，固定边缘，位于 HUD 文本上方不遮挡
+    this._bombBtn.x = 20;
+    this._bombBtn.y = h - 160;
+    this._pauseBtn.x = w - 20 - this._pauseBtn.w;
+    this._pauseBtn.y = h - 160;
 
     this._bullets = new BulletSystem();
     this._particles = new ParticleSystem();
@@ -138,9 +147,29 @@ export class GameScene extends Scene {
     this._achievements.update(dt);
     if (this._vignette > 0) this._vignette -= dt * 2;
 
+    // 移动端：同步 UI 按钮命中区（仅战斗阶段，防误触移动）
+    const inBattle = this._phase === 'playing' || this._phase === 'boss';
+    if (this.game.input.scheme === 'touch') {
+      if (inBattle) {
+        this.game.input.setUiHitAreas([
+          { x: this._bombBtn.x, y: this._bombBtn.y, w: this._bombBtn.w, h: this._bombBtn.h },
+          { x: this._pauseBtn.x, y: this._pauseBtn.y, w: this._pauseBtn.w, h: this._pauseBtn.h },
+        ]);
+      } else {
+        this.game.input.setUiHitAreas([]);
+      }
+    }
+    // 按钮按下动画衰减
+    if (this._bombBtn.press > 0) this._bombBtn.press = Math.max(0, this._bombBtn.press - dt * 4);
+    if (this._pauseBtn.press > 0) this._pauseBtn.press = Math.max(0, this._pauseBtn.press - dt * 4);
+
     // 暂停检测
-    if (this.game.input.consumePause() && (this._phase === 'playing' || this._phase === 'boss')) {
+    if (this.game.input.consumePause() && inBattle) {
       this.game.pushPause();
+    }
+    // 双指炸弹（移动端额外操作方式）
+    if (this.game.input.consumeBomb() && inBattle) {
+      if (this._player.useBomb()) this._useBomb();
     }
   }
 
@@ -525,6 +554,9 @@ export class GameScene extends Scene {
     // HUD
     this._renderHUD(ctx);
 
+    // 移动端功能按钮
+    this._renderMobileControls(ctx);
+
     // 成就 Toast
     this._achievements.render(ctx);
   }
@@ -647,6 +679,117 @@ export class GameScene extends Scene {
         this._useBomb();
       }
     }
+  }
+
+  /** 移动端按钮点击命中检测 */
+  onPointerDown(x: number, y: number): void {
+    if (this.game.input.scheme !== 'touch') return;
+    if (this._phase !== 'playing' && this._phase !== 'boss') return;
+    // 炸弹按钮
+    if (this._hitBtn(this._bombBtn, x, y)) {
+      this._bombBtn.press = 1;
+      if (this._player.bombs > 0 && this._player.useBomb()) {
+        this._useBomb();
+      }
+      return;
+    }
+    // 暂停按钮
+    if (this._hitBtn(this._pauseBtn, x, y)) {
+      this._pauseBtn.press = 1;
+      this.game.pushPause();
+      return;
+    }
+  }
+
+  private _hitBtn(btn: { x: number; y: number; w: number; h: number }, x: number, y: number): boolean {
+    return x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h;
+  }
+
+  /** 渲染移动端功能按钮（仅触控方案） */
+  private _renderMobileControls(ctx: CanvasRenderingContext2D): void {
+    if (this.game.input.scheme !== 'touch') return;
+    if (this._phase !== 'playing' && this._phase !== 'boss') return;
+    this._drawTouchButton(ctx, this._bombBtn, 'bomb', this._player.bombs > 0, this._player.bombs);
+    this._drawTouchButton(ctx, this._pauseBtn, 'pause', true, 0);
+  }
+
+  private _drawTouchButton(
+    ctx: CanvasRenderingContext2D,
+    btn: { x: number; y: number; w: number; h: number; press: number },
+    type: 'bomb' | 'pause',
+    enabled: boolean,
+    count: number,
+  ): void {
+    const press = btn.press;
+    const scale = 1 - press * 0.12;
+    const cx = btn.x + btn.w / 2;
+    const cy = btn.y + btn.h / 2;
+    ctx.save();
+    ctx.globalAlpha = enabled ? 0.9 : 0.35;
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+    // 辉光
+    if (press > 0.01) {
+      ctx.shadowColor = type === 'bomb' ? PALETTE.purple : PALETTE.primary;
+      ctx.shadowBlur = 24 * press;
+    }
+    // 切角背景
+    ctx.fillStyle = 'rgba(10,24,56,0.75)';
+    ctx.strokeStyle = enabled
+      ? type === 'bomb'
+        ? PALETTE.purple
+        : PALETTE.primary
+      : 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 2;
+    this._roundRect(ctx, -btn.w / 2, -btn.h / 2, btn.w, btn.h, 14);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // 图标
+    if (type === 'bomb') {
+      ctx.fillStyle = enabled ? PALETTE.purple : 'rgba(255,255,255,0.3)';
+      ctx.beginPath();
+      ctx.arc(0, 2, 15, 0, Math.PI * 2);
+      ctx.fill();
+      // 引信
+      ctx.strokeStyle = PALETTE.warning;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(8, -11);
+      ctx.lineTo(14, -17);
+      ctx.stroke();
+      // 火花
+      ctx.fillStyle = PALETTE.warning;
+      ctx.beginPath();
+      ctx.arc(14, -17, 3, 0, Math.PI * 2);
+      ctx.fill();
+      // 数量
+      ctx.fillStyle = PALETTE.text;
+      ctx.font = `bold 12px ${FONTS.mono}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`×${count}`, 0, 26);
+    } else {
+      // 暂停：双竖条
+      ctx.fillStyle = enabled ? PALETTE.primary : 'rgba(255,255,255,0.3)';
+      ctx.fillRect(-8, -12, 6, 24);
+      ctx.fillRect(2, -12, 6, 24);
+    }
+    ctx.restore();
+  }
+
+  private _roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
   }
 
   private _useBomb(): void {

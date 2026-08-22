@@ -31,6 +31,12 @@ export class Player extends Entity {
   private _gameW: number;
   private _gameH: number;
   private _vel = { x: 0, y: 0 };
+  // 触控相对偏移：手指按下处为原点，飞机按手指相对位移移动（手指不遮挡飞机）
+  private _touchActive = false;
+  private _touchStartX = 0;
+  private _touchStartY = 0;
+  private _planeStartX = 0;
+  private _planeStartY = 0;
 
   constructor(input: InputManager, bullets: BulletSystem, particles: ParticleSystem, w: number, h: number) {
     super(w / 2, h - 120);
@@ -62,36 +68,66 @@ export class Player extends Entity {
   }
 
   private _handleMovement(dt: number): void {
-    const follow = this._input.getFollowTarget();
-    if (follow) {
-      // 鼠标/触摸跟随
-      const dx = follow.x - this.pos.x;
-      const dy = follow.y - this.pos.y;
-      const d = Math.hypot(dx, dy);
-      if (d > 1) {
-        const speed = CONFIG.player.speed;
-        const move = Math.min(d, speed * dt);
-        this.pos.x += (dx / d) * move;
-        this.pos.y += (dy / d) * move;
-      }
-      this._slowMode = false;
+    if (this._input.scheme === 'touch') {
+      // 移动端：相对偏移触控
+      this._handleTouchMove();
     } else {
-      // 键盘移动（带加速度）
-      this._slowMode = this._input.isSlowMode();
-      const speed = this._slowMode ? CONFIG.player.slowSpeed : CONFIG.player.speed;
-      const dir = this._input.getMoveDir();
-      const targetVx = dir ? dir.x * speed : 0;
-      const targetVy = dir ? dir.y * speed : 0;
-      const accelRate = 1 / CONFIG.player.accel;
-      this._vel.x += (targetVx - this._vel.x) * Math.min(1, accelRate * dt * 6);
-      this._vel.y += (targetVy - this._vel.y) * Math.min(1, accelRate * dt * 6);
-      this.pos.x += this._vel.x * dt;
-      this.pos.y += this._vel.y * dt;
+      const follow = this._input.getFollowTarget();
+      if (follow) {
+        // 鼠标绝对跟随（桌面端）
+        const dx = follow.x - this.pos.x;
+        const dy = follow.y - this.pos.y;
+        const d = Math.hypot(dx, dy);
+        if (d > 1) {
+          const speed = CONFIG.player.speed;
+          const move = Math.min(d, speed * dt);
+          this.pos.x += (dx / d) * move;
+          this.pos.y += (dy / d) * move;
+        }
+        this._slowMode = false;
+      } else {
+        // 键盘移动（带加速度）
+        this._slowMode = this._input.isSlowMode();
+        const speed = this._slowMode ? CONFIG.player.slowSpeed : CONFIG.player.speed;
+        const dir = this._input.getMoveDir();
+        const targetVx = dir ? dir.x * speed : 0;
+        const targetVy = dir ? dir.y * speed : 0;
+        const accelRate = 1 / CONFIG.player.accel;
+        this._vel.x += (targetVx - this._vel.x) * Math.min(1, accelRate * dt * 6);
+        this._vel.y += (targetVy - this._vel.y) * Math.min(1, accelRate * dt * 6);
+        this.pos.x += this._vel.x * dt;
+        this.pos.y += this._vel.y * dt;
+      }
     }
 
     // 边界
     this.pos.x = clamp(this.pos.x, this.radius, this._gameW - this.radius);
     this.pos.y = clamp(this.pos.y, this.radius, this._gameH - this.radius);
+  }
+
+  /**
+   * 移动端相对偏移操控：
+   * 手指按下时记录手指起点与飞机起点，移动时飞机位置 = 飞机起点 + (当前手指 - 手指起点)
+   * 飞机与手指保持固定偏移，手指不遮挡飞机；1:1 直接定位，无延迟
+   */
+  private _handleTouchMove(): void {
+    const ptr = this._input.getPointer();
+    if (!this._touchActive && ptr.down) {
+      this._touchActive = true;
+      this._touchStartX = ptr.x;
+      this._touchStartY = ptr.y;
+      this._planeStartX = this.pos.x;
+      this._planeStartY = this.pos.y;
+    }
+    if (this._touchActive) {
+      if (!ptr.down) {
+        this._touchActive = false;
+      } else {
+        this.pos.x = this._planeStartX + (ptr.x - this._touchStartX);
+        this.pos.y = this._planeStartY + (ptr.y - this._touchStartY);
+      }
+    }
+    this._slowMode = false;
   }
 
   private _handleShooting(dt: number): void {

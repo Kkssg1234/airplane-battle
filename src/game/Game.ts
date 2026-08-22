@@ -63,6 +63,11 @@ export class Game {
     this.config = this.storage.loadConfig();
     this.input = new InputManager(canvas);
     this.input.setScheme(this.config.controlScheme);
+    // 移动端自动切换触控方案（不影响桌面端）
+    if (InputManager.isMobile()) {
+      this.config.controlScheme = 'touch';
+      this.input.setScheme('touch');
+    }
     this.audio = new AudioManager(this.config);
 
     this.loop = new GameLoop(
