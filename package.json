@@ -1,0 +1,16 @@
+{
+  "name": "plane-war",
+  "version": "1.0.0",
+  "description": "科技风格飞机大战网页小游戏",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0"
+  }
+}
