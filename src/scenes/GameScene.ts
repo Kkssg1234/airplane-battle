@@ -18,7 +18,7 @@ import { AchievementSystem, RunStats } from '../systems/AchievementSystem';
 import { HUD } from '../ui/HUD';
 import { CONFIG, PALETTE, FONTS } from '../data/config';
 import { getLevel, MAX_LEVEL, getBossTheme } from '../data/levels';
-import type { EnemyTypeId, PowerUpType } from '../types';
+import type { EnemyTypeId, PowerUpType, PlaneTypeId } from '../types';
 import { eventBus } from '../utils/eventBus';
 import { chance, range } from '../utils/random';
 import { easeOutCubic } from '../utils/math';
@@ -28,6 +28,8 @@ type Phase = 'intro' | 'playing' | 'bossWarn' | 'boss' | 'cleared' | 'dead';
 export class GameScene extends Scene {
   private _levelId: number;
   private _endless: boolean;
+  /** 当前出战飞机型号 */
+  private _planeType: PlaneTypeId;
   private _phase: Phase = 'intro';
 
   private _player: Player;
@@ -53,26 +55,30 @@ export class GameScene extends Scene {
   private _vignette = 0; // 受击红屏
   private _bossSummonListener: () => void;
   private _shootListener: () => void;
-  // 移动端功能按钮（炸弹 / 暂停）
+  // 移动端功能按钮（技能 / 炸弹 / 暂停）
   private _bombBtn = { x: 0, y: 0, w: 84, h: 84, press: 0 };
   private _pauseBtn = { x: 0, y: 0, w: 84, h: 84, press: 0 };
+  private _skillBtn = { x: 0, y: 0, w: 64, h: 64, press: 0 };
 
-  constructor(game: Game, levelId: number, endless: boolean) {
+  constructor(game: Game, levelId: number, endless: boolean, planeType: PlaneTypeId = 'falcon') {
     super(game);
     this._levelId = levelId;
     this._endless = endless;
+    this._planeType = planeType;
     const w = game.width;
     const h = game.height;
 
-    // 移动端按钮：左下炸弹 / 右下暂停，固定边缘，位于 HUD 文本上方不遮挡
+    // 移动端按钮：左下炸弹（技能在其上方）/ 右下暂停，固定边缘，位于 HUD 文本上方不遮挡
     this._bombBtn.x = 20;
     this._bombBtn.y = h - 160;
     this._pauseBtn.x = w - 20 - this._pauseBtn.w;
     this._pauseBtn.y = h - 160;
+    this._skillBtn.x = 20;
+    this._skillBtn.y = h - 160 - 74;
 
     this._bullets = new BulletSystem();
     this._particles = new ParticleSystem();
-    this._player = new Player(game.input, this._bullets, this._particles, w, h);
+    this._player = new Player(game.input, this._bullets, this._particles, w, h, planeType);
     this._stats = new RunStats();
     this._difficulty = new DifficultyManager(levelId, endless);
     this._spawner = new SpawnSystem(levelId, endless);
@@ -154,6 +160,7 @@ export class GameScene extends Scene {
         this.game.input.setUiHitAreas([
           { x: this._bombBtn.x, y: this._bombBtn.y, w: this._bombBtn.w, h: this._bombBtn.h },
           { x: this._pauseBtn.x, y: this._pauseBtn.y, w: this._pauseBtn.w, h: this._pauseBtn.h },
+          { x: this._skillBtn.x, y: this._skillBtn.y, w: this._skillBtn.w, h: this._skillBtn.h },
         ]);
       } else {
         this.game.input.setUiHitAreas([]);
@@ -162,6 +169,7 @@ export class GameScene extends Scene {
     // 按钮按下动画衰减
     if (this._bombBtn.press > 0) this._bombBtn.press = Math.max(0, this._bombBtn.press - dt * 4);
     if (this._pauseBtn.press > 0) this._pauseBtn.press = Math.max(0, this._pauseBtn.press - dt * 4);
+    if (this._skillBtn.press > 0) this._skillBtn.press = Math.max(0, this._skillBtn.press - dt * 4);
 
     // 暂停检测
     if (this.game.input.consumePause() && inBattle) {
@@ -170,6 +178,30 @@ export class GameScene extends Scene {
     // 双指炸弹（移动端额外操作方式）
     if (this.game.input.consumeBomb() && inBattle) {
       if (this._player.useBomb()) this._useBomb();
+    }
+    // 主动技能（C 键 / 移动端技能按钮）
+    if (this.game.input.consumeSkill() && inBattle) {
+      this._useSkill();
+    }
+  }
+
+  /** 释放主动技能：幻影相位附带清除全部敌弹 */
+  private _useSkill(): void {
+    const skillId = this._player.tryUseSkill();
+    if (!skillId) return;
+    this.game.audio.playSfx('powerup');
+    this._particles.explode(this._player.pos.x, this._player.pos.y, this._player.plane.color, 24, 1.2);
+    if (skillId === 'phase') {
+      // 相位闪避：瞬间清除全部敌弹（含 BOSS 弹幕），保留敌机
+      let cleared = 0;
+      for (const b of this._bullets.active) {
+        if (b.owner === 'enemy') {
+          b.alive = false;
+          cleared++;
+          if (cleared % 12 === 0) this._particles.explode(b.pos.x, b.pos.y, PALETTE.accent, 3, 0.4);
+        }
+      }
+      this._hud.shake(8);
     }
   }
 
@@ -312,11 +344,10 @@ export class GameScene extends Scene {
   }
 
   private _checkCollisions(): void {
-    const playerBullets = this._bullets.active.filter((b) => b.owner === 'player');
-    const enemyBullets = this._bullets.active.filter((b) => b.owner === 'enemy');
+    // 性能优化：直接传入全部子弹（CollisionSystem 内部按 owner 分发 + 空间网格），
+    // 消除旧版每帧 filter 产生的两个临时数组
     this._collision.check({
-      playerBullets,
-      enemyBullets,
+      bullets: this._bullets.active,
       enemies: this._enemies,
       powerups: this._powerups,
       player: this._player,
@@ -398,9 +429,11 @@ export class GameScene extends Scene {
     if (pu.type === 'wipe') {
       this._clearScreen();
     }
+    // v2 叠加机制：满额道具转化为补偿分数
+    const bonus = p.isStackedFull(pu.type) ? CONFIG.powerUpStack.fullBonusScore : 50;
     p.applyPowerUp(pu.type);
     pu.alive = false;
-    this._addScore(50);
+    this._addScore(bonus);
     this._particles.explode(pu.pos.x, pu.pos.y, pu.color, 12, 0.8);
     this.game.audio.playSfx('powerup');
     eventBus.emit('powerup:pickup', { type: pu.type });
@@ -485,13 +518,15 @@ export class GameScene extends Scene {
       this._phase = 'playing';
       return;
     }
-    // 记录通关
+    // 记录通关：解锁下一关 + 记录该关最高分（关卡进度独立保存）
     this._achievements.onLevelComplete(this._levelId, false, 0);
+    this.game.storage.unlockLevel(this._levelId);
+    this.game.storage.recordLevelScore(this._levelId, this._score, false);
     if (this._levelId >= MAX_LEVEL) {
       // 全部通关
       this._goGameOver(true);
     } else {
-      // 下一关
+      // 下一关（连续推进）
       this._levelId++;
       this._levelTime = 0;
       this._phase = 'intro';
@@ -504,12 +539,22 @@ export class GameScene extends Scene {
 
   private _goGameOver(victory: boolean): void {
     this._achievements.onLevelComplete(this._levelId, this._endless, this._levelTime / 60);
+    // 存档结算：本局得分累加进累计分数货币（用于解锁飞机）
+    const prevTotal = this.game.storage.loadProgress().totalScore;
+    this.game.storage.addTotalScore(this._score);
+    // 失败时也记录关卡最高分（通关路径已在 _proceedAfterClear 记录）
+    if (!victory && !this._endless) {
+      this.game.storage.recordLevelScore(this._levelId, this._score, false);
+    }
     this.game.changeScene('gameover', {
       score: this._score,
       level: this._levelId,
       kills: this._stats.kills,
       victory,
       endless: this._endless,
+      earnedCurrency: this._score,
+      newTotalScore: prevTotal + this._score,
+      plane: this._planeType,
     });
   }
 
@@ -563,46 +608,72 @@ export class GameScene extends Scene {
 
   private _renderBackground(ctx: CanvasRenderingContext2D): void {
     const { width: w, height: h } = this.game;
-    const level = getLevel(this._levelId);
+    // 性能优化：星空/网格预渲染为离屏图层，每帧仅 drawImage 两次/层
+    // （替代旧版每帧 100+ 次 arc + stroke 调用），两层不同滚动速度保留视差感
     ctx.fillStyle = PALETTE.bg;
     ctx.fillRect(0, 0, w, h);
-
-    // 星空
     const t = this.game.time.elapsed;
-    ctx.fillStyle = PALETTE.text;
-    for (let i = 0; i < this._stars.length; i++) {
-      const s = this._stars[i];
-      const y = (s.y + t * s.s) % h;
-      ctx.globalAlpha = s.a;
-      ctx.beginPath();
-      ctx.arc(s.x, y, s.r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 0.12;
-    ctx.strokeStyle = PALETTE.bgGrid;
-    ctx.lineWidth = 1;
-    const gy = (t * 60) % 80;
-    for (let y = -80 + gy; y < h; y += 80) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
+    for (const layer of this._bgLayers) {
+      const off = (t * layer.speed) % h;
+      ctx.drawImage(layer.canvas, 0, off);
+      ctx.drawImage(layer.canvas, 0, off - h);
     }
     ctx.globalAlpha = 1;
   }
 
-  private _stars: { x: number; y: number; r: number; s: number; a: number }[] = [];
+  /** 预渲染背景图层（无缝循环：每颗星在 y 与 y-h 各绘制一份） */
+  private _bgLayers: { canvas: HTMLCanvasElement; speed: number }[] = [];
   private _initStars(): void {
-    const { width: w, height: h } = this.game;
-    for (let i = 0; i < 100; i++) {
-      this._stars.push({
-        x: Math.random() * w,
-        y: Math.random() * h,
-        r: Math.random() * 1.5 + 0.3,
-        s: Math.random() * 60 + 20,
-        a: 0.2 + Math.random() * 0.5,
-      });
-    }
+    const w = this.game.width;
+    const h = this.game.height;
+    const buildLayer = (
+      starCount: number,
+      rMin: number,
+      rMax: number,
+      alphaBase: number,
+      speed: number,
+      withGrid: boolean,
+    ): { canvas: HTMLCanvasElement; speed: number } => {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const cx = c.getContext('2d')!;
+      cx.fillStyle = PALETTE.text;
+      for (let i = 0; i < starCount; i++) {
+        const x = Math.random() * w;
+        const y = Math.random() * h;
+        const r = rMin + Math.random() * (rMax - rMin);
+        cx.globalAlpha = alphaBase + Math.random() * 0.4;
+        cx.beginPath();
+        cx.arc(x, y, r, 0, Math.PI * 2);
+        cx.fill();
+        // 上方补绘制保证纵向无缝循环
+        cx.beginPath();
+        cx.arc(x, y - h, r, 0, Math.PI * 2);
+        cx.fill();
+      }
+      if (withGrid) {
+        cx.globalAlpha = 0.12;
+        cx.strokeStyle = PALETTE.bgGrid;
+        cx.lineWidth = 1;
+        for (let y = 0; y < h; y += 80) {
+          cx.beginPath();
+          cx.moveTo(0, y);
+          cx.lineTo(w, y);
+          cx.stroke();
+          cx.beginPath();
+          cx.moveTo(0, y - h);
+          cx.lineTo(w, y - h);
+          cx.stroke();
+        }
+      }
+      cx.globalAlpha = 1;
+      return { canvas: c, speed };
+    };
+    this._bgLayers = [
+      buildLayer(60, 0.3, 0.9, 0.15, 25, false), // 远景慢速星
+      buildLayer(45, 0.5, 1.5, 0.25, 70, true), // 近景快速星 + 网格
+    ];
   }
 
   private _renderIntro(ctx: CanvasRenderingContext2D): void {
@@ -623,6 +694,15 @@ export class GameScene extends Scene {
     ctx.font = `16px ${FONTS.body}`;
     ctx.shadowBlur = 8;
     ctx.fillText(this._endless ? '无尽模式' : `LEVEL ${this._levelId}`, w / 2, h / 2 + 20);
+    // 当前出战机型 + 技能提示
+    ctx.fillStyle = this._player.plane.color;
+    ctx.shadowColor = this._player.plane.color;
+    ctx.font = `bold 15px ${FONTS.body}`;
+    ctx.fillText(
+      `${this._player.plane.name} · 技能 [C] ${this._player.plane.skill.name}`,
+      w / 2,
+      h / 2 + 52,
+    );
     ctx.restore();
   }
 
@@ -685,6 +765,12 @@ export class GameScene extends Scene {
   onPointerDown(x: number, y: number): void {
     if (this.game.input.scheme !== 'touch') return;
     if (this._phase !== 'playing' && this._phase !== 'boss') return;
+    // 技能按钮
+    if (this._hitBtn(this._skillBtn, x, y)) {
+      this._skillBtn.press = 1;
+      this._useSkill();
+      return;
+    }
     // 炸弹按钮
     if (this._hitBtn(this._bombBtn, x, y)) {
       this._bombBtn.press = 1;
@@ -711,12 +797,13 @@ export class GameScene extends Scene {
     if (this._phase !== 'playing' && this._phase !== 'boss') return;
     this._drawTouchButton(ctx, this._bombBtn, 'bomb', this._player.bombs > 0, this._player.bombs);
     this._drawTouchButton(ctx, this._pauseBtn, 'pause', true, 0);
+    this._drawTouchButton(ctx, this._skillBtn, 'skill', this._player.skillReady, 0);
   }
 
   private _drawTouchButton(
     ctx: CanvasRenderingContext2D,
     btn: { x: number; y: number; w: number; h: number; press: number },
-    type: 'bomb' | 'pause',
+    type: 'bomb' | 'pause' | 'skill',
     enabled: boolean,
     count: number,
   ): void {
@@ -728,18 +815,17 @@ export class GameScene extends Scene {
     ctx.globalAlpha = enabled ? 0.9 : 0.35;
     ctx.translate(cx, cy);
     ctx.scale(scale, scale);
+    // 图标主题色
+    const themeColor =
+      type === 'bomb' ? PALETTE.purple : type === 'skill' ? PALETTE.green : PALETTE.primary;
     // 辉光
     if (press > 0.01) {
-      ctx.shadowColor = type === 'bomb' ? PALETTE.purple : PALETTE.primary;
+      ctx.shadowColor = themeColor;
       ctx.shadowBlur = 24 * press;
     }
     // 切角背景
     ctx.fillStyle = 'rgba(10,24,56,0.75)';
-    ctx.strokeStyle = enabled
-      ? type === 'bomb'
-        ? PALETTE.purple
-        : PALETTE.primary
-      : 'rgba(255,255,255,0.25)';
+    ctx.strokeStyle = enabled ? themeColor : 'rgba(255,255,255,0.25)';
     ctx.lineWidth = 2;
     this._roundRect(ctx, -btn.w / 2, -btn.h / 2, btn.w, btn.h, 14);
     ctx.fill();
@@ -769,6 +855,23 @@ export class GameScene extends Scene {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(`×${count}`, 0, 26);
+    } else if (type === 'skill') {
+      // 技能：闪电符号（就绪时高亮，冷却时暗淡）
+      ctx.fillStyle = enabled ? PALETTE.green : 'rgba(255,255,255,0.3)';
+      if (enabled) {
+        ctx.shadowColor = PALETTE.green;
+        ctx.shadowBlur = 10;
+      }
+      ctx.beginPath();
+      ctx.moveTo(4, -16);
+      ctx.lineTo(-8, 2);
+      ctx.lineTo(-1, 2);
+      ctx.lineTo(-4, 16);
+      ctx.lineTo(8, -2);
+      ctx.lineTo(1, -2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
     } else {
       // 暂停：双竖条
       ctx.fillStyle = enabled ? PALETTE.primary : 'rgba(255,255,255,0.3)';

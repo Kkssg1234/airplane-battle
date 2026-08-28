@@ -5,7 +5,7 @@
 import { Scene } from './Scene';
 import type { Game } from '../game/Game';
 import { Button } from '../ui/Button';
-import { PALETTE, FONTS, ACHIEVEMENTS } from '../data/config';
+import { PALETTE, FONTS, ACHIEVEMENTS, getPlane } from '../data/config';
 import type { ScoreRecord } from '../types';
 import { easeOutCubic } from '../utils/math';
 
@@ -33,15 +33,20 @@ export class MenuScene extends Scene {
   private _buildMainButtons(): void {
     this._buttons = [];
     const w = 280;
-    const h = 54;
+    const h = 52;
     const x = (this.game.width - w) / 2;
-    let y = this.game.height * 0.42;
-    const gap = 14;
+    let y = this.game.height * 0.35;
+    const gap = 12;
 
     const progress = this.game.storage.loadProgress();
     const startLabel = progress.highestLevel > 1 ? `继续游戏 (关卡 ${progress.highestLevel})` : '开始游戏';
 
     this._buttons.push(new Button({ x, y, w, h, text: startLabel, color: PALETTE.primary, onClick: () => this._startGame(progress.highestLevel) }));
+    y += h + gap;
+    // v2：关卡选择（自由选关）与机库（飞机选择/解锁）
+    this._buttons.push(new Button({ x, y, w, h, text: '关卡选择', color: PALETTE.accent, onClick: () => this._toLevelSelect() }));
+    y += h + gap;
+    this._buttons.push(new Button({ x, y, w, h, text: '机库', color: PALETTE.green, onClick: () => this._toPlaneSelect() }));
     y += h + gap;
     this._buttons.push(new Button({ x, y, w, h, text: '无尽模式', color: PALETTE.accent, onClick: () => this._startEndless() }));
     y += h + gap;
@@ -50,6 +55,18 @@ export class MenuScene extends Scene {
     this._buttons.push(new Button({ x, y, w, h, text: '成就', color: PALETTE.green, onClick: () => this._showPanel('achievements') }));
     y += h + gap;
     this._buttons.push(new Button({ x, y, w, h, text: '设置', color: PALETTE.purple, onClick: () => this._showPanel('settings') }));
+  }
+
+  /** 进入关卡选择界面（自由选择已解锁关卡） */
+  private _toLevelSelect(): void {
+    this.game.audio.playSfx('click');
+    this.game.changeScene('levelSelect');
+  }
+
+  /** 进入机库（飞机选择/解锁） */
+  private _toPlaneSelect(): void {
+    this.game.audio.playSfx('click');
+    this.game.changeScene('planeSelect');
   }
 
   private _startGame(level: number): void {
@@ -121,7 +138,7 @@ export class MenuScene extends Scene {
       ctx.fillStyle = PALETTE.text;
       ctx.globalAlpha = t * 0.6;
       ctx.font = `13px ${FONTS.mono}`;
-      ctx.fillText('方向键/WASD 移动 · Shift 慢速 · 空格/Z 射击 · X 炸弹 · Esc 暂停', w / 2, h * 0.34);
+      ctx.fillText('方向键/WASD 移动 · Shift 慢速 · 空格/Z 射击 · X 炸弹 · C 技能 · Esc 暂停', w / 2, h * 0.28);
       ctx.globalAlpha = t;
     }
 

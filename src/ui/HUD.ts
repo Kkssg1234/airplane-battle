@@ -150,6 +150,48 @@ export class HUD {
     ctx.fillStyle = PALETTE.text;
     ctx.font = `bold 11px ${FONTS.mono}`;
     ctx.fillText(`BOMB × ${player.bombs}`, x, y + 34);
+    // 主动技能冷却条（C 键）
+    this._renderSkill(ctx, player, x, y + 52);
+  }
+
+  /** 主动技能状态：就绪高亮 / 冷却进度条 */
+  private _renderSkill(ctx: CanvasRenderingContext2D, player: Player, x: number, y: number): void {
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = PALETTE.text;
+    ctx.font = `bold 11px ${FONTS.mono}`;
+    const label = `SKILL [C] ${player.plane.skill.name}`;
+    ctx.fillText(label, x, y);
+    const barW = 150;
+    const barH = 7;
+    const bx = x;
+    const by = y + 15;
+    ctx.fillStyle = 'rgba(10,24,56,0.8)';
+    ctx.fillRect(bx, by, barW, barH);
+    if (player.skillReady) {
+      // 就绪：满条高亮
+      ctx.fillStyle = PALETTE.green;
+      ctx.shadowColor = PALETTE.green;
+      ctx.shadowBlur = 8;
+      ctx.fillRect(bx, by, barW, barH);
+      ctx.shadowBlur = 0;
+    } else {
+      // 冷却：按剩余比例填充
+      const ratio = 1 - player.skillCooldown / player.plane.skill.cooldown;
+      ctx.fillStyle = PALETTE.text;
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(bx, by, barW * Math.max(0, Math.min(1, ratio)), barH);
+      ctx.globalAlpha = 1;
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx, by, barW, barH);
+    // 技能生效剩余时间提示
+    if (player.skillActiveTime > 0) {
+      ctx.fillStyle = PALETTE.warning;
+      ctx.font = `bold 11px ${FONTS.mono}`;
+      ctx.fillText('ACTIVE!', bx + barW + 8, by - 2);
+    }
   }
 
   private _renderLevel(ctx: CanvasRenderingContext2D, w: number, h: number): void {

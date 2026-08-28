@@ -38,10 +38,14 @@ export class PauseScene extends Scene {
 
   private _restart(): void {
     this.game.audio.playSfx('click');
-    // 用当前 GameScene 的关卡重启：通过切换到 game 场景
+    // 用当前 GameScene 的关卡与机型重启：通过切换到 game 场景
     // 由于 GameScene 已在栈底，先 pop 自身，再切换
     this.game.scenes.pop();
-    this.game.changeScene('game', { level: this._getLevel(), endless: this._getEndless() });
+    this.game.changeScene('game', {
+      level: this._getLevel(),
+      endless: this._getEndless(),
+      plane: this.game.lastPlane,
+    });
   }
 
   private _toMenu(): void {

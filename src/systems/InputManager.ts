@@ -21,7 +21,7 @@ export class InputManager {
   // 消费型事件（一次性）
   private _bombPressed = false;
   private _pausePressed = false;
-  private _weaponSwitchPressed = false;
+  private _skillPressed = false; // 主动技能键（C）
 
   /** 双指触摸检测炸弹 */
   private _touchCount = 0;
@@ -84,9 +84,9 @@ export class InputManager {
       this._keys.add(k);
       if (k === 'x') this._bombPressed = true;
       if (k === 'escape' || k === 'p') this._pausePressed = true;
-      if (k === 'c') this._weaponSwitchPressed = true;
+      if (k === 'c') this._skillPressed = true; // 主动技能
       // 阻止方向键/空格滚动页面
-      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'x', 'z'].includes(k)) {
+      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'x', 'z', 'c'].includes(k)) {
         e.preventDefault();
       }
     });
@@ -198,9 +198,10 @@ export class InputManager {
     return v;
   }
 
-  consumeWeaponSwitch(): boolean {
-    const v = this._weaponSwitchPressed;
-    this._weaponSwitchPressed = false;
+  /** 消费主动技能按键（一次性） */
+  consumeSkill(): boolean {
+    const v = this._skillPressed;
+    this._skillPressed = false;
     return v;
   }
 

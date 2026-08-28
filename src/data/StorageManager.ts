@@ -83,12 +83,27 @@ export class StorageManager {
   // ---------- 游戏进度 ----------
   loadProgress(): GameProgress {
     if (this._memProgress) return this._memProgress;
-    let prog: GameProgress = { ...DEFAULT_PROGRESS };
+    let prog: GameProgress = { ...DEFAULT_PROGRESS, levelBestScores: {}, unlockedPlanes: ['falcon'] };
     if (this._lsAvailable) {
       try {
         const raw = localStorage.getItem(STORAGE_KEYS.progress);
         if (raw) {
-          prog = { ...DEFAULT_PROGRESS, ...(JSON.parse(raw) as Partial<GameProgress>) };
+          const saved = JSON.parse(raw) as Partial<GameProgress>;
+          prog = { ...prog, ...saved };
+          // v1 -> v2 迁移：补全新增字段，highestLevel 映射到 unlockedLevels
+          if (saved.version !== DEFAULT_PROGRESS.version) {
+            prog.version = DEFAULT_PROGRESS.version;
+            if (prog.unlockedLevels == null || prog.unlockedLevels < 1) {
+              prog.unlockedLevels = Math.max(1, prog.highestLevel ?? 1);
+            }
+            prog.highestLevel = prog.unlockedLevels;
+            if (!prog.levelBestScores) prog.levelBestScores = {};
+            if (!prog.totalScore) prog.totalScore = 0;
+            if (!prog.unlockedPlanes?.length) prog.unlockedPlanes = ['falcon'];
+            if (!prog.selectedPlane) prog.selectedPlane = 'falcon';
+            // 迁移后立即落盘
+            this.saveProgress(prog);
+          }
         }
       } catch {
         /* ignore */
@@ -99,6 +114,7 @@ export class StorageManager {
   }
 
   saveProgress(p: GameProgress): void {
+    p.version = DEFAULT_PROGRESS.version;
     p.lastSavedAt = Date.now();
     this._memProgress = p;
     if (this._lsAvailable) {
@@ -108,6 +124,67 @@ export class StorageManager {
         console.warn('[Storage] 保存进度失败', e);
       }
     }
+  }
+
+  // ---------- 存档便捷接口（关卡/飞机/货币） ----------
+
+  /** 关卡是否已解锁 */
+  isLevelUnlocked(levelId: number): boolean {
+    return levelId <= this.loadProgress().unlockedLevels;
+  }
+
+  /** 通关：解锁下一关 + 记录该关最高分，返回是否首次解锁新关卡 */
+  unlockLevel(levelId: number): boolean {
+    const p = this.loadProgress();
+    let newUnlock = false;
+    if (levelId + 1 > p.unlockedLevels) {
+      p.unlockedLevels = levelId + 1;
+      p.highestLevel = levelId + 1;
+      newUnlock = true;
+    }
+    this.saveProgress(p);
+    return newUnlock;
+  }
+
+  /** 累计分数货币（独立于单局最高分，用于解锁飞机） */
+  addTotalScore(pts: number): void {
+    if (pts <= 0) return;
+    const p = this.loadProgress();
+    p.totalScore += pts;
+    this.saveProgress(p);
+  }
+
+  /** 记录关卡独立最高分，返回是否刷新纪录 */
+  recordLevelScore(levelId: number, score: number, endless: boolean): boolean {
+    if (endless) return false; // 无尽模式不按关卡记分
+    const p = this.loadProgress();
+    const key = String(levelId);
+    const best = p.levelBestScores[key] ?? 0;
+    if (score > best) {
+      p.levelBestScores[key] = score;
+      this.saveProgress(p);
+      return true;
+    }
+    return false;
+  }
+
+  /** 解锁飞机（花费累计分数货币），返回是否成功 */
+  unlockPlane(planeId: import('../types').PlaneTypeId, cost: number): boolean {
+    const p = this.loadProgress();
+    if (p.unlockedPlanes.includes(planeId)) return false;
+    if (p.totalScore < cost) return false;
+    p.totalScore -= cost;
+    p.unlockedPlanes.push(planeId);
+    this.saveProgress(p);
+    return true;
+  }
+
+  /** 选择飞机（须已解锁） */
+  selectPlane(planeId: import('../types').PlaneTypeId): void {
+    const p = this.loadProgress();
+    if (!p.unlockedPlanes.includes(planeId)) return;
+    p.selectedPlane = planeId;
+    this.saveProgress(p);
   }
 
   // ---------- 排行榜 ----------

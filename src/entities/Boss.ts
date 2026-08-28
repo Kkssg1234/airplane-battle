@@ -24,6 +24,8 @@ export const BOSS_THEMES: BossTheme[] = [
   { id: 4, name: '「编队」指挥', color: PALETTE.purple, maxHp: 240 },
   { id: 5, name: '「幻影」幽灵', color: PALETTE.accent, maxHp: 280 },
   { id: 6, name: '「终焉」核心', color: PALETTE.danger, maxHp: 400 },
+  { id: 7, name: '「深渊」巨兽', color: '#7A00B8', maxHp: 480 },
+  { id: 8, name: '「虚空」主宰', color: '#FF6600', maxHp: 640 },
 ];
 
 type Phase = 1 | 2 | 3;

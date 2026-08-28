@@ -31,7 +31,10 @@ export type Bounds = Rect | Circle;
 export type Faction = 'player' | 'enemy' | 'playerBullet' | 'enemyBullet' | 'powerup' | 'neutral';
 
 /** 场景标识 */
-export type SceneId = 'boot' | 'menu' | 'game' | 'pause' | 'gameover';
+export type SceneId = 'boot' | 'menu' | 'game' | 'pause' | 'gameover' | 'levelSelect' | 'planeSelect';
+
+/** 飞机型号 ID（默认机 + 3 款可解锁新机） */
+export type PlaneTypeId = 'falcon' | 'swift' | 'fortress' | 'phantom';
 
 /** 画质等级 */
 export type Quality = 'low' | 'medium' | 'high';
@@ -50,14 +53,34 @@ export interface UserConfig {
   controlScheme: ControlScheme;
 }
 
-/** 游戏进度（LocalStorage 持久化） */
+/** 游戏进度（LocalStorage 持久化，v2 结构） */
 export interface GameProgress {
   version: string;
+  /** 兼容字段：已解锁的最大关卡（1-based，与 unlockedLevels 同步） */
   highestLevel: number;
+  /** 已解锁关卡数：玩家可自由选择 1..unlockedLevels 的任意关卡 */
+  unlockedLevels: number;
+  /** 每关独立最高分：{ [levelId]: bestScore } */
+  levelBestScores: Record<string, number>;
+  /** 累计总分（货币）：用于解锁新飞机，独立于单局最高分 */
+  totalScore: number;
+  /** 已解锁飞机列表 */
+  unlockedPlanes: PlaneTypeId[];
+  /** 当前选中飞机 */
+  selectedPlane: PlaneTypeId;
   totalKills: number;
   totalPlayTime: number;
   unlockedAchievements: string[];
   lastSavedAt: number;
+}
+
+/** 飞机主动技能定义 */
+export interface PlaneSkill {
+  id: 'overdrive' | 'fortress' | 'phase';
+  name: string;
+  desc: string;
+  cooldown: number; // 冷却秒数
+  duration: number; // 持续秒数（瞬发类为无敌时长）
 }
 
 /** 排行榜记录（IndexedDB 持久化） */
@@ -91,6 +114,7 @@ export type GameEvent =
   | 'level:start'
   | 'achievement:unlock'
   | 'bomb:use'
+  | 'skill:use'
   | 'score:change';
 
 /** 成就定义 */

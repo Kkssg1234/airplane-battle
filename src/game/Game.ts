@@ -10,7 +10,7 @@ import { InputManager } from '../systems/InputManager';
 import { StorageManager } from '../data/StorageManager';
 import { AudioManager } from '../systems/AudioManager';
 import { DESIGN_WIDTH, DESIGN_HEIGHT, PALETTE } from '../data/config';
-import type { SceneId, UserConfig } from '../types';
+import type { SceneId, UserConfig, PlaneTypeId } from '../types';
 
 // 场景类延迟引用（运行时实例化，规避循环依赖）
 import { BootScene } from '../scenes/BootScene';
@@ -18,14 +18,20 @@ import { MenuScene } from '../scenes/MenuScene';
 import { GameScene } from '../scenes/GameScene';
 import { PauseScene } from '../scenes/PauseScene';
 import { GameOverScene } from '../scenes/GameOverScene';
+import { LevelSelectScene } from '../scenes/LevelSelectScene';
+import { PlaneSelectScene } from '../scenes/PlaneSelectScene';
 
 export interface SceneChangeOptions {
   level?: number;
   endless?: boolean;
+  plane?: PlaneTypeId;
   score?: number;
   kills?: number;
   victory?: boolean;
   noDamage?: boolean;
+  /** 结算货币信息（v2 存档系统） */
+  earnedCurrency?: number;
+  newTotalScore?: number;
 }
 
 export class Game {
@@ -47,6 +53,8 @@ export class Game {
   /** 当前游戏关卡信息（供暂停重启使用） */
   lastLevel = 1;
   lastEndless = false;
+  /** 当前出战飞机（供暂停重启使用） */
+  lastPlane: PlaneTypeId = 'falcon';
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -102,13 +110,22 @@ export class Game {
       case 'menu':
         this.scenes.switch(new MenuScene(this));
         break;
-      case 'game':
+      case 'game': {
         this.lastLevel = opts.level ?? 1;
         this.lastEndless = opts.endless ?? false;
-        this.scenes.switch(new GameScene(this, this.lastLevel, this.lastEndless));
+        // 出战飞机：显式指定 > 存档选中机型
+        this.lastPlane = opts.plane ?? this.storage.loadProgress().selectedPlane;
+        this.scenes.switch(new GameScene(this, this.lastLevel, this.lastEndless, this.lastPlane));
         break;
+      }
       case 'gameover':
         this.scenes.switch(new GameOverScene(this, opts));
+        break;
+      case 'levelSelect':
+        this.scenes.switch(new LevelSelectScene(this));
+        break;
+      case 'planeSelect':
+        this.scenes.switch(new PlaneSelectScene(this));
         break;
       case 'pause':
         this.scenes.push(new PauseScene(this));

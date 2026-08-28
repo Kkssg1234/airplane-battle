@@ -6,7 +6,7 @@ import { Scene } from './Scene';
 import type { Game } from '../game/Game';
 import type { SceneChangeOptions } from '../game/Game';
 import { Button } from '../ui/Button';
-import { PALETTE, FONTS } from '../data/config';
+import { PALETTE, FONTS, getPlane } from '../data/config';
 import { easeOutCubic } from '../utils/math';
 
 export class GameOverScene extends Scene {
@@ -50,7 +50,12 @@ export class GameOverScene extends Scene {
 
   private _retry(): void {
     this.game.audio.playSfx('click');
-    this.game.changeScene('game', { level: 1, endless: this._opts.endless ?? false });
+    // 重试当前关卡（v2：保留关卡与机型），无尽模式保持无尽
+    this.game.changeScene('game', {
+      level: this._opts.level ?? 1,
+      endless: this._opts.endless ?? false,
+      plane: this._opts.plane,
+    });
   }
 
   private _toMenu(): void {
@@ -139,13 +144,23 @@ export class GameOverScene extends Scene {
     ctx.fillText((this._opts.score ?? 0).toLocaleString(), w / 2, panelY + 68);
     ctx.shadowBlur = 0;
 
-    // 关卡 & 击杀
+    // 关卡 & 击杀 & 出战机型
     ctx.fillStyle = PALETTE.text;
     ctx.font = `16px ${FONTS.body}`;
+    const planeName = this._opts.plane ? getPlane(this._opts.plane).name : '';
     ctx.fillText(
-      `${this._opts.endless ? '无尽模式' : '关卡 ' + this._opts.level}  |  击杀 ${this._opts.kills ?? 0}`,
+      `${this._opts.endless ? '无尽模式' : '关卡 ' + this._opts.level}  |  击杀 ${this._opts.kills ?? 0}  |  ${planeName}号机`,
       w / 2,
       panelY + 110,
+    );
+
+    // v2 货币结算：本局得分累加进累计积分（解锁飞机用）
+    ctx.fillStyle = PALETTE.warning;
+    ctx.font = `bold 14px ${FONTS.mono}`;
+    ctx.fillText(
+      `积分 +${(this._opts.earnedCurrency ?? 0).toLocaleString()}  →  累计 ${(this._opts.newTotalScore ?? 0).toLocaleString()}`,
+      w / 2,
+      panelY + 138,
     );
 
     // 进榜提示
